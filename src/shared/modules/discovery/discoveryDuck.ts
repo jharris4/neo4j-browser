@@ -178,12 +178,24 @@ export const discoveryOnStartupEpic = (some$: any, store: any) => {
     })
     .merge(some$.ofType(USER_CLEAR))
     .mergeMap(async (action: any) => {
-      // we can get data about which host different mechanisms, they are ranked in
-      // the following prioritization order
-      // 1. Url param - dbms
-      // 2. Url param - connectURL
-      // 3. database in discovery endpoint
-      // 4. Url param - discoveryURL
+      // For now we only want discoverydata we know is relevant to a specific bolt host
+      // We can discover data from the following sources
+      // encoded in action.forceURL
+      // from hosted discovery
+      // from fetching discoveryURL
+      // from fetching the connectURL
+      // from fetching a host entered previously
+
+      // We can get a host from these sources. we pick one host to be most relevant
+      // Order is:
+      /* 
+      entered previously
+      from forceURL
+      from discoveryURL
+      from hosted
+
+      we fetch all these, merge on what host we care about
+      */
 
       let dataFromForceUrl: DiscoverableData = {}
 
@@ -206,16 +218,6 @@ export const discoveryOnStartupEpic = (some$: any, store: any) => {
         dataFromForceUrl = onlyTruthy
       }
 
-      // Only do network call when we can guess discovery endpoint
-      if (!action.discoveryURL && !hasDiscoveryEndpoint(store.getState())) {
-        authLog('No discovery endpoint found or passed')
-        if (action.forceURL) {
-          return Promise.resolve({ type: DONE, discovered: dataFromForceUrl })
-        } else {
-          return Promise.resolve({ type: 'NOOP' })
-        }
-      }
-
       const discoveryEndpoint = getDiscoveryEndpoint(
         getHostedUrl(store.getState())
       )
@@ -230,34 +232,6 @@ export const discoveryOnStartupEpic = (some$: any, store: any) => {
             host: undefined
           }))
 
-      const newProvidersFromDiscoveryURL = discoveryURLData.ssoProviders.filter(
-        providerFromDiscUrl =>
-          !discoveryEndpointData.ssoProviders.find(
-            provider => providerFromDiscUrl.id === provider.id
-          )
-      )
-
-      const mergedSSOProviders = discoveryEndpointData.ssoProviders.concat(
-        newProvidersFromDiscoveryURL
-      )
-
-      // TODO make sure the URL data is more inmpratnt than endpoint data
-      // connect-bolt discovery -> connect-bolt URL
-      // queryparam discovery -> discoveryURL
-      // queryparam-bolt discovery -> connectURL
-      // hosted discovery -> hostedURL
-      if(wasRedirectedBackFromSSOServer && hasHasSessionStroageSSOwhat){
-        useConnectBoltDisocvery()
-        return
-      }
-
-      if(hasDiscoveryParam) {
-        useDiscoveryParam()
-        return
-      }
-
-      fetch(connectURL, hosted)
-      boltHost: {sso}
       // startup
       // fetch all of them
       // merge via priority
@@ -267,48 +241,8 @@ export const discoveryOnStartupEpic = (some$: any, store: any) => {
 
       // connect form
       // show what startup has
-      // 1st step if they edit -> fetch that bolt host, (keep in local state for now) ignore everything else 
+      // 1st step if they edit -> fetch that bolt host, (keep in local state for now) ignore everything else
       // 2nd step -> annotate with hosts, avoid refecthing and enable merging all four
-
-      if(bothHave data && connectURL === hosted.host) {
-        merge
-        useMerged()
-      } else {
-        use connect if exists
-
-        else use hosted
-
-      }
-
-
-
-
-
-
-      const mergedDiscoveryData = {
-        ...(discoveryURLData.status === Success ? discoveryURLData : {}),
-        ...(discoveryEndpointData.status === Success
-          ? discoveryEndpointData
-          : {}),
-        ...dataFromForceUrl,
-        SSOProviders: mergedSSOProviders,
-        authenticationMethod: mergedSSOProviders.length > 0 ? SSO : undefined
-      }
-
-      // TODO these next 2 lines need fixing
-      mergedDiscoveryData.host =
-        discoveryURLData.status !== FetchError
-          ? discoveryURLData.host
-          : discoveryEndpointData.status !== FetchError
-          ? discoveryEndpointData.host
-          : mergedDiscoveryData.host
-
-      const discoveryHost =
-        discoveryURLData.status !== FetchError
-          ? discoveryURLData.host
-          : discoveryEndpointData.status !== FetchError
-          ? discoveryEndpointData.host
-          : null
 
       const isAura = isConnectedAuraHost(store.getState())
       mergedDiscoveryData.supportsMultiDb =
