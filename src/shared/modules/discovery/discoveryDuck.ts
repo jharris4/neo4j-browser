@@ -18,7 +18,6 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import remote from 'services/remote'
 import {
   DiscoverableData,
   SSOProvider,
@@ -34,25 +33,26 @@ import {
 } from 'shared/modules/app/appDuck'
 import { getDiscoveryEndpoint, SSO } from 'services/bolt/boltHelpers'
 import { generateBoltUrl } from 'services/boltscheme.utils'
-import { getUrlInfo } from 'shared/services/utils'
+import { getUrlInfo, hostIsAllowed } from 'shared/services/utils'
 import { isConnectedAuraHost } from 'shared/modules/connections/connectionsDuck'
 import { isCloudHost } from 'shared/services/utils'
 import { NEO4J_CLOUD_DOMAINS } from 'shared/modules/settings/settingsDuck'
 import {
   authRequestForSSO,
   handleAuthFromRedirect,
-  // TODO this next line needs fixing
-  SSOProvider as Neo4jClientSSOProvider,
   authLog,
   removeSearchParamsInBrowserHistory,
   getSSOServerIdIfShouldRedirect,
-  getValidSSOProviders,
   wasRedirectedBackFromSSOServer,
   defaultSearchParamsToRemoveAfterAutoRedirect,
   fetchDiscoveryDataFromUrl,
   DiscoveryResult,
-  DiscoveryResultStatus
+  Success,
+  FetchError,
+  NoProviderError
 } from 'neo4j-client-sso'
+import { connect } from 'react-redux'
+import { merge } from 'lodash'
 
 export const NAME = 'discover-bolt-host'
 export const CONNECTION_ID = '$$discovery'
@@ -219,15 +219,15 @@ export const discoveryOnStartupEpic = (some$: any, store: any) => {
       const discoveryEndpoint = getDiscoveryEndpoint(
         getHostedUrl(store.getState())
       )
-      const discoveryEndpointData = await fetchDiscoveryDataFromUrl(
+      const discoveryEndpointData = await fetchBrowserDiscoveryDataFromUrl(
         discoveryEndpoint
       )
       const discoveryURLData = await (action.discoveryURL
-        ? fetchDiscoveryDataFromUrl(action.discoveryURL)
+        ? fetchBrowserDiscoveryDataFromUrl(action.discoveryURL)
         : Promise.resolve({
-            status: DiscoveryResultStatus.NoProviderError,
+            status: NoProviderError,
             ssoProviders: [],
-            otherDataDiscovered: {}
+            host: undefined
           }))
 
       const newProvidersFromDiscoveryURL = discoveryURLData.ssoProviders.filter(
@@ -241,11 +241,53 @@ export const discoveryOnStartupEpic = (some$: any, store: any) => {
         newProvidersFromDiscoveryURL
       )
 
+      // TODO make sure the URL data is more inmpratnt than endpoint data
+      // connect-bolt discovery -> connect-bolt URL
+      // queryparam discovery -> discoveryURL
+      // queryparam-bolt discovery -> connectURL
+      // hosted discovery -> hostedURL
+      if(wasRedirectedBackFromSSOServer && hasHasSessionStroageSSOwhat){
+        useConnectBoltDisocvery()
+        return
+      }
+
+      if(hasDiscoveryParam) {
+        useDiscoveryParam()
+        return
+      }
+
+      fetch(connectURL, hosted)
+      boltHost: {sso}
+      // startup
+      // fetch all of them
+      // merge via priority
+      // discard incorrect hosts, and log
+      // read from session storage for the redirect
+      // decorate the host later
+
+      // connect form
+      // show what startup has
+      // 1st step if they edit -> fetch that bolt host, (keep in local state for now) ignore everything else 
+      // 2nd step -> annotate with hosts, avoid refecthing and enable merging all four
+
+      if(bothHave data && connectURL === hosted.host) {
+        merge
+        useMerged()
+      } else {
+        use connect if exists
+
+        else use hosted
+
+      }
+
+
+
+
+
+
       const mergedDiscoveryData = {
-        ...(discoveryURLData.status === DiscoveryResultStatus.Success
-          ? discoveryURLData
-          : {}),
-        ...(discoveryEndpointData.status === DiscoveryResultStatus.Success
+        ...(discoveryURLData.status === Success ? discoveryURLData : {}),
+        ...(discoveryEndpointData.status === Success
           ? discoveryEndpointData
           : {}),
         ...dataFromForceUrl,
@@ -255,16 +297,16 @@ export const discoveryOnStartupEpic = (some$: any, store: any) => {
 
       // TODO these next 2 lines need fixing
       mergedDiscoveryData.host =
-        discoveryURLData.status !== DiscoveryResultStatus.FetchError
-          ? discoveryURLData.otherDataDiscovered?.host
-          : discoveryEndpointData.status !== DiscoveryResultStatus.FetchError
+        discoveryURLData.status !== FetchError
+          ? discoveryURLData.host
+          : discoveryEndpointData.status !== FetchError
           ? discoveryEndpointData.host
           : mergedDiscoveryData.host
 
       const discoveryHost =
-        discoveryURLData.status !== DiscoveryResultStatus.FetchError
+        discoveryURLData.status !== FetchError
           ? discoveryURLData.host
-          : discoveryEndpointData.status !== DiscoveryResultStatus.FetchError
+          : discoveryEndpointData.status !== FetchError
           ? discoveryEndpointData.host
           : null
 
@@ -300,9 +342,7 @@ export const discoveryOnStartupEpic = (some$: any, store: any) => {
         )
         if (selectedSSOProvider)
           try {
-            await authRequestForSSO(
-              selectedSSOProvider as Neo4jClientSSOProvider
-            )
+            await authRequestForSSO(selectedSSOProvider as SSOProvider)
           } catch (e) {
             if (e instanceof Error) {
               SSOError = e.message
@@ -353,6 +393,34 @@ export const discoveryOnStartupEpic = (some$: any, store: any) => {
       }
     })
     .map((a: any) => a)
+}
+
+type ExtraDiscoveryFields = {
+  host?: string
+  neo4jVersion?: string
+  neo4jEdition?: string
+}
+
+type BrowserDiscoveryResult = DiscoveryResult & ExtraDiscoveryFields
+
+async function fetchBrowserDiscoveryDataFromUrl(
+  url: string
+): Promise<BrowserDiscoveryResult> {
+  const res = await fetchDiscoveryDataFromUrl(url)
+  const { otherDataDiscovered } = res
+
+  const strOrUndefined = (val: unknown) =>
+    typeof val === 'string' ? val : undefined
+
+  const host = strOrUndefined(
+    otherDataDiscovered.bolt_routing ||
+      otherDataDiscovered.bolt_direct ||
+      otherDataDiscovered.bolt
+  )
+  const neo4jVersion = strOrUndefined(otherDataDiscovered.neo4j_version)
+  const neo4jEdition = strOrUndefined(otherDataDiscovered.neo4j_edition)
+
+  return { ...res, host, neo4jEdition, neo4jVersion }
 }
 
 // async function fetchDataFromDiscoveryUrl(
